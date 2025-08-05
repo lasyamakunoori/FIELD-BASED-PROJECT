@@ -1,0 +1,146 @@
+# Big Mart Sales Prediction using Machine Learning
+
+# ---------------------------------------------
+# Step 1: Importing necessary libraries
+# ---------------------------------------------
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.preprocessing import LabelEncoder
+from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_squared_error, r2_score
+
+# ---------------------------------------------
+# Step 2: Load the dataset
+# ---------------------------------------------
+train = pd.read_csv("Train_BigMart.csv")
+test = pd.read_csv("Test_BigMart.csv")
+
+# Backup copies
+train_original = train.copy()
+test_original = test.copy()
+
+# Combine datasets to apply preprocessing uniformly
+data = pd.concat([train, test], axis=0)
+
+# ---------------------------------------------
+# Step 3: Exploratory Data Analysis
+# ---------------------------------------------
+print(data.head())
+print(data.describe())
+print(data.isnull().sum())
+
+# Visualize missing values
+sns.heatmap(data.isnull(), cbar=False)
+plt.title("Missing Values Heatmap")
+plt.show()
+
+# ---------------------------------------------
+# Step 4: Data Cleaning
+# ---------------------------------------------
+# Fill missing Item_Weight with mean
+data['Item_Weight'].fillna(data['Item_Weight'].mean(), inplace=True)
+
+# Fill missing Outlet_Size with mode
+data['Outlet_Size'].fillna(data['Outlet_Size'].mode()[0], inplace=True)
+
+# Replace 0 in Item_Visibility with median
+data['Item_Visibility'] = data['Item_Visibility'].replace(0, np.nan)
+data['Item_Visibility'].fillna(data['Item_Visibility'].median(), inplace=True)
+
+# ---------------------------------------------
+# Step 5: Feature Engineering
+# ---------------------------------------------
+# Combine Item_Type into broader categories
+data['Item_Category'] = data['Item_Identifier'].apply(lambda x: x[0:2])
+data['Item_Category'] = data['Item_Category'].map({'FD': 'Food', 'NC': 'Non-Consumable', 'DR': 'Drinks'})
+
+# Create a new feature: Outlet_Years
+data['Outlet_Years'] = 2025 - data['Outlet_Establishment_Year']
+
+# Convert fat content into consistent format
+data['Item_Fat_Content'] = data['Item_Fat_Content'].replace({'LF':'Low Fat','low fat':'Low Fat','reg':'Regular'})
+
+# For non-consumable items, fat content is not applicable
+data.loc[data['Item_Category'] == "Non-Consumable", 'Item_Fat_Content'] = "Non-Edible"
+
+# Label encoding
+le = LabelEncoder()
+cat_vars = ['Item_Fat_Content', 'Outlet_Location_Type', 'Outlet_Size', 'Outlet_Type', 'Item_Category']
+for col in cat_vars:
+    data[col] = le.fit_transform(data[col])
+
+# One-hot encoding for Item_Type and Outlet_Identifier
+data = pd.get_dummies(data, columns=['Item_Type', 'Outlet_Identifier'])
+
+# Drop unused columns
+data.drop(['Item_Identifier', 'Outlet_Establishment_Year'], axis=1, inplace=True)
+
+# ---------------------------------------------
+# Step 6: Splitting the Data
+# ---------------------------------------------
+train = data[:train.shape[0]]
+test = data[train.shape[0]:]
+
+X = train.drop(['Item_Outlet_Sales'], axis=1)
+y = train['Item_Outlet_Sales']
+
+X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# ---------------------------------------------
+# Step 7: Model Building & Evaluation
+# ---------------------------------------------
+
+# Linear Regression
+lr = LinearRegression()
+lr.fit(X_train, y_train)
+lr_pred = lr.predict(X_val)
+
+print("Linear Regression R2 Score:", r2_score(y_val, lr_pred))
+print("Linear Regression RMSE:", np.sqrt(mean_squared_error(y_val, lr_pred)))
+
+# Random Forest
+rf = RandomForestRegressor(n_estimators=100, random_state=42)
+rf.fit(X_train, y_train)
+rf_pred = rf.predict(X_val)
+
+print("Random Forest R2 Score:", r2_score(y_val, rf_pred))
+print("Random Forest RMSE:", np.sqrt(mean_squared_error(y_val, rf_pred)))
+
+# ---------------------------------------------
+# Step 8: Predict on Test Data
+# ---------------------------------------------
+final_predictions = rf.predict(test.drop(['Item_Outlet_Sales'], axis=1))
+
+# Create submission
+submission = pd.DataFrame({
+    'Item_Identifier': test_original['Item_Identifier'],
+    'Outlet_Identifier': test_original['Outlet_Identifier'],
+    'Item_Outlet_Sales': final_predictions
+})
+
+submission.to_csv("BigMart_Predictions.csv", index=False)
+print("Submission file saved as BigMart_Predictions.csv")
+# Sales per Outlet
+plt.figure(figsize=(12,6))
+sns.boxplot(data=train_original, x='Outlet_Identifier', y='Item_Outlet_Sales')
+plt.title("Item Outlet Sales across Outlets")
+plt.xticks(rotation=45)
+plt.show()
+
+# Sales by Fat Content
+plt.figure(figsize=(8,6))
+sns.boxplot(data=train_original, x='Item_Fat_Content', y='Item_Outlet_Sales')
+plt.title("Sales vs Item Fat Content")
+plt.show()
+
+# Sales vs Item Visibility
+plt.figure(figsize=(8,6))
+sns.scatterplot(x=train['Item_Visibility'], y=train['Item_Outlet_Sales'])
+plt.title("Item Visibility vs Sales")
+plt.show()
+
